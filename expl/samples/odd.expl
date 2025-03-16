@@ -1,0 +1,16 @@
+int main(){
+	decl
+		int a, b, temp;
+	enddecl
+	begin
+		a = 1;
+		while(a <= 100) do
+			b = a % 2;
+			if(b == 1)then
+				temp = exposcall("Write", -2, a);
+			endif;
+			a = a + 1;
+		endwhile;
+		return 0;
+	end
+}
