@@ -1,0 +1,115 @@
+alias currPID R2;
+
+
+//Get PCB entry (finds a free process table entry)
+if(R1 == 1) then
+    R0 = 0;
+    while(R0 < 16) do
+        if([PROCESS_TABLE+ R0 * 16 + 4] == TERMINATED) then
+        
+            [PROCESS_TABLE + R0 * 16 + 1] = R0;
+            [PROCESS_TABLE + R0 * 16 + 4] = ALLOCATED;             //state
+            [PROCESS_TABLE + R0 * 16 + 14] = PAGE_TABLE_BASE + R0 * 20;       //ptbr
+            [PROCESS_TABLE + R0 * 16 + 15] = 10;                  //ptlr
+            return;
+        endif;
+        R0 = R0 + 1;
+    endwhile;
+    R0 = -1;
+    return;
+
+endif;
+
+
+
+
+//FREE USER AREA PAGE
+if(R1 == 2) then 
+
+    multipush(R1, R2);
+    R1 = 2;                                   //RELEASE PAGE
+    R2 = [PROCESS_TABLE + currPID * 16 + 11]; //user area page
+    call MEMORY_MANAGER;                      //MOD 2
+    multipop(R1, R2);
+
+endif;
+
+
+
+
+//EXIT PROCESS
+if (R1 == 3) then 
+
+    //deallocate pages in page table
+	multipush(R1, R2);
+    R1 = 4;                    //FREE PAGE TABLE  
+    call PROCESS_MANAGER;      //MOD 1
+    multipop(R1, R2);
+
+
+    //deallocate user area page
+    multipush(R1, R2);
+    R1 = 2;                    //FREE USER AREA PAGE
+    call PROCESS_MANAGER;      //MOD 1
+    multipop(R1,R2);
+
+
+    //set state to terminated
+    [PROCESS_TABLE + currPID * 16 + 4] = TERMINATED;
+	
+endif;
+
+
+
+
+//FREE PAGE TABLE
+if (R1 == 4) then
+
+    alias ptbr R3;
+    ptbr = [PROCESS_TABLE + 16 * currPID + 14]; 
+
+    //library pages
+	[ptbr + 0] = -1; 
+	[ptbr + 1] = "0000"; 
+	[ptbr + 2] = -1; 
+	[ptbr + 3] = "0000";
+
+
+    //invoke RELEASE PAGE on all pages in page table other than library pages
+    alias i R4;
+    i = 4;
+    while(i <= 18) do
+        if ([ptbr + i] != -1) then
+
+            multipush(R1, R2, R3, R4);
+            R1 = 2;                     //RELEASE PAGE
+            R2 = [ptbr + i];            //page number to be released
+            call MEMORY_MANAGER;        //MOD 2
+            multipop(R1, R2, R3, R4);
+
+            [ptbr + i + 1] = "0000";
+        endif;
+        i = i + 2;
+    endwhile; 
+    i = 2;
+    while (i < 10) do
+        if ((i == 2 || i == 3 || i == 8 || i == 9) && [DISK_MAP_TABLE + currPID * 10 + i] != -1) then
+            multipush(R0, R1, R2, R3, R4);
+            R1  = 4;
+            R2 = [DISK_MAP_TABLE + currPID * 10 + i];
+            call MOD_2;
+            multipop(R0, R1, R2, R3, R4);
+        endif;
+        [DISK_MAP_TABLE + currPID * 10 + i] = -1;
+        i = i + 1;
+    endwhile;
+    i = 0;
+    while(i < 10) do
+        [DISK_MAP_TABLE + currPID * 10 + i] = -1;
+        i = i + 1;
+    endwhile;
+
+endif;
+
+breakpoint;
+return;

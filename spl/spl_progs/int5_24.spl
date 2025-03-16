@@ -1,0 +1,100 @@
+alias pt R3;
+pt = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+
+//save user stack value and switch to kernel stack
+alias userSP R4;
+userSP = SP;
+[pt + 13] = SP;
+SP = [pt + 11] * 512 - 1;
+
+
+//extract system call number
+alias sysno R1;
+sysno = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + (userSP - 5) % 512];
+
+[pt + 9] = sysno;
+
+
+alias returnadd R5;
+returnadd = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + (userSP - 1) % 512;
+
+alias pprt R7;
+pprt = [pt + 11] * 512 + RESOURCE_TABLE_OFFSET;
+
+
+//open
+if(sysno == 2) then
+    alias fileName R6;
+    fileName = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + (userSP - 4) % 512];
+    
+    //find a free per process resource table entry
+    alias i R2;
+    i = 0;
+    while(i < 8) do
+        if([pprt + i * 2] == -1) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == 8) then
+        [returnadd] = -3;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    alias fileTableEntry R9;
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8);
+    R1 = 3;
+    R2 = fileName;
+    call FILE_MANAGER;
+    fileTableEntry = R0;
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8);
+
+    if(fileTableEntry < 0) then
+        [returnadd] = fileTableEntry;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    [pprt + i * 2] = FILE;
+    [pprt + i * 2 + 1] = fileTableEntry;
+
+    [returnadd] = i;
+    SP = userSP;
+    [pt + 9] = 0;
+    ireturn;
+endif;
+
+
+//close
+if(sysno == 3) then
+    alias fileDesc R8;
+    fileDesc = [[PTBR + 2 * ((userSP - 4)) / 512] * 512 + (userSP - 4) % 512];
+
+    if(fileDesc > 7 || fileDesc < 0 || [pprt + 2 * fileDesc] != FILE) then 
+        [returnadd] = -1;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9);
+    R1 = 4;
+    R2 = [pprt + 2 * fileDesc + 1];
+    call FILE_MANAGER;
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9);
+
+
+    [pprt + 2 * fileDesc] = -1;
+
+    [returnadd] = 0;
+    SP = userSP;
+    [pt + 9] = 0;
+    ireturn;
+
+endif;
+

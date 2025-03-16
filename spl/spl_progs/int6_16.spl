@@ -1,0 +1,97 @@
+//Set the MODE FLAG in the process table of the current process
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 7;
+
+
+
+
+//Save the value of register SP as userSP
+
+alias userSP R0;
+userSP = SP;
+
+
+//Store the value of register SP in the UPTR field of the process table entry of the current process.
+
+[PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 13] = SP;
+
+
+
+//Initialize SP (kernel stack pointer) to (user area page number) * 512 -1
+
+SP = [PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 11] * 512 - 1;
+
+
+
+//Retrieve the file descriptor from the user stack, stored at userSP - 4
+
+alias physicalPageNum R1;
+alias offset R2;
+alias fileDescPhysicalAddr R3;
+physicalPageNum = [PTBR + 2 * ((userSP - 4)/ 512)];
+offset = (userSP - 4) % 512;
+fileDescPhysicalAddr = (physicalPageNum * 512) + offset;
+alias fileDescriptor R4;
+fileDescriptor=[fileDescPhysicalAddr];
+
+
+
+//If the file descriptor is not -1, store -1 as the return value in the user stack (at position userSP - 1).
+
+if (fileDescriptor != -1) then
+	alias physicalAddrRetVal R5;
+	physicalAddrRetVal = ([PTBR + 2 * ((userSP - 1) / 512)] * 512) + ((userSP - 1) % 512);
+	[physicalAddrRetVal] = -1;
+
+
+
+
+else
+    //Retrieve the word address sent as an argument from the user stack (userSP-3).
+
+	alias word R5;
+	word = [([PTBR + 2 * (userSP - 3)/ 512] * 512) + ((userSP - 3) % 512)];
+	 
+
+    //Push all the registers used till now in this interrupt.
+	multipush(R0,R1,R2,R3,R4,R5);
+	 
+
+    
+    //Save the function number of the Terminal Read function in the register R1. Save PID of the current process and the word address obtained above in registers R2 and R3 respectively.
+
+	alias func_num R1;
+	alias currPID R2;
+	alias word_addr  R3;
+	func_num = 4;
+	currPID = [SYSTEM_STATUS_TABLE + 1];
+	word_addr = word;
+	
+
+    //Call device manager module. 
+	call MOD_4;
+
+
+    //Restore the registers 
+	multipop(R0,R1,R2,R3,R4,R5);
+	 
+	
+    //Store 0 as return value in the user stack indicating success.
+
+    [([PTBR + 2 * (userSP - 1)/ 512] * 512) + ((userSP - 1) % 512)] = 0;
+
+endif;
+
+
+//Reset the MODE FLAG in the process table to 0.
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+
+
+//Change SP back to user stack and return to the user mode.
+
+SP = userSP;
+
+
+ireturn;

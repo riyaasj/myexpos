@@ -1,0 +1,15 @@
+[SYSTEM_STATUS_TABLE + 27] = [SYSTEM_STATUS_TABLE + 27] + 1;
+alias taskManager R0;
+taskManager = SYSTEM_STATUS_TABLE + 24;
+print "contextSwitches:-";
+print [taskManager];     //SYSTEM_STATUS_TABLE + 24
+print "------------";
+print "maxMemUsage:-";
+print [taskManager + 1];  //SYSTEM_STATUS_TABLE + 25
+print "------------";
+print "diskAccesses:-";
+print [taskManager + 2];   //SYSTEM_STATUS_TABLE + 26
+print "------------";
+print "kernelSwitches:-";
+print [taskManager + 3];   //SYSTEM_STATUS_TABLE + 27
+halt;

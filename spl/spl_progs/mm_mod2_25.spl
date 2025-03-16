@@ -1,0 +1,144 @@
+
+
+//GET FREE PAGE
+if (R1 == 1) then 
+    //Increment WAIT_MEM_COUNT field in the system status table.
+    [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] + 1;
+
+
+    //While memory is full (MEM_FREE_COUNT will be 0)
+    while([SYSTEM_STATUS_TABLE + 2] == 0) do
+        //Set the state of the invoked process as WAIT_MEM.
+        [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 4] = WAIT_MEM;
+
+        //Schedule other process by invoking the context switch module
+        multipush(R1, R2);
+        call SCHEDULER; 
+        multipop(R1, R2);
+    endwhile;
+
+    //Decrement the WAIT_MEM_COUNT field
+    [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] - 1;
+
+    //MEM_FREE_COUNT
+    [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+    
+
+    //Find a free page using memory free list and set the corresponding entry as 1. Make sure to store the obtained free page number in R0 as return value.
+    alias free_page R0;
+    free_page = 76;
+    while (([MEMORY_FREE_LIST + free_page] > 0) && (free_page < 128)) do
+        free_page = free_page + 1;
+    endwhile;
+       
+    [MEMORY_FREE_LIST + free_page] = 1;
+    return;
+endif;
+
+
+
+//RELEASE PAGE
+if (R1 == 2) then
+    alias page_num R2;
+    //Decrement the corresponding entry in the memory free list.
+	[MEMORY_FREE_LIST + page_num] = [MEMORY_FREE_LIST + page_num] - 1;
+
+    //If that entry in the memory free list becomes zero, then the page is free. So increment the MEM_FREE_COUNT in the system status table.
+    if ([MEMORY_FREE_LIST + page_num] == 0) then
+        [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] + 1;
+    endif;
+
+    //Update the STATUS to READY for all processes (with valid PID) which have STATUS as WAIT_MEM.
+    alias i R3;
+    i = 1 ;
+    while(i < 16) do
+        if([PROCESS_TABLE + i * 16 + 4] == WAIT_MEM) then
+            [PROCESS_TABLE + i *16 + 4 ] = READY;
+        endif;
+        i = i + 1;
+    endwhile;
+	return;
+endif;
+
+//GET FREE BLOCK
+if(R1 == 3) then
+    alias i R2;
+    i = DISK_FREE_AREA;
+    while (i < DISK_SWAP_AREA) do
+        if ([DISK_FREE_LIST + i] == 0) then
+            [DISK_FREE_LIST + i] = 1;
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+    if (i == DISK_SWAP_AREA) then
+        R0 = -1;
+        return;
+    endif;
+    R0 = i;
+    return;
+endif;
+
+
+
+
+
+
+
+
+//RELEASE BLOCK
+if(R1 == 4)   then
+    [DISK_FREE_LIST + R2] = [DISK_FREE_LIST + R2] - 1;
+    return;
+endif;
+
+//GET CODE PAGE
+if(R1 == 5) then
+
+    alias blockNumber R2;
+    alias i R3;
+    alias j R4;
+    alias pageNumber R5;
+
+    i = 0;
+    while (i < 15) do
+        j = 4;
+        while (j < 8) do
+            if ([DISK_MAP_TABLE + 10 * i + j] == blockNumber) then
+                pageNumber = [PAGE_TABLE_BASE + 20 * i + 8 + 2 * (j - 4)];
+                if (pageNumber != -1) then
+                    [MEMORY_FREE_LIST + pageNumber] = [MEMORY_FREE_LIST + pageNumber] + 1;
+                    R0 = pageNumber;
+                    return;
+                endif;
+            endif;
+            j = j + 1;
+        endwhile;
+        i = i + 1;
+    endwhile;
+
+    //else
+    multipush(R0,R1,R2);
+    R1 = 1;
+    call MOD_2;               //get free pg fn in MEMORY MANAGER
+    R3 = R0;                  //MEM pg no
+    multipop(R0,R1,R2);
+
+    multipush(R0,R1,R2,R3);
+    R4 = blockNumber;//R2 value
+    R1 = 2;
+    R2 = [SYSTEM_STATUS_TABLE+1];
+    R3 = R3;
+    call MOD_4; //Disk Load fn in DEVICE MANAGER
+    multipop(R0,R1,R2,R3);
+
+    R0 = R3;//returning pg no
+    
+    return;
+endif;
+
+
+
+     
+        
+

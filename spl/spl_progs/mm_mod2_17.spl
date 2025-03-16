@@ -1,0 +1,63 @@
+alias page_num R2;
+
+
+//GET FREE PAGE
+if (R1 == 1) then 
+    //Increment WAIT_MEM_COUNT field in the system status table.
+    [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] + 1;
+
+
+    //While memory is full (MEM_FREE_COUNT will be 0)
+    while([SYSTEM_STATUS_TABLE + 2] == 0) do
+        //Set the state of the invoked process as WAIT_MEM.
+        [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 4] = WAIT_MEM;
+
+        //Schedule other process by invoking the context switch module
+        multipush(R1, R2);
+        call SCHEDULER; 
+        multipop(R1, R2);
+    endwhile;
+
+    //Decrement the WAIT_MEM_COUNT field
+    [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] - 1;
+
+    //MEM_FREE_COUNT
+    [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+    
+
+    //Find a free page using memory free list and set the corresponding entry as 1. Make sure to store the obtained free page number in R0 as return value.
+    alias free_page R0;
+    free_page = 76;
+    while([MEMORY_FREE_LIST + free_page] == 1) do
+        free_page = free_page + 1;
+    endwhile;
+       
+    [MEMORY_FREE_LIST + free_page] = 1;
+    breakpoint;
+    return;
+endif;
+
+
+
+//RELEASE PAGE
+if (R1 == 2) then
+    //Decrement the corresponding entry in the memory free list.
+	[MEMORY_FREE_LIST + page_num] = [MEMORY_FREE_LIST + page_num] - 1;
+
+    //If that entry in the memory free list becomes zero, then the page is free. So increment the MEM_FREE_COUNT in the system status table.
+    if ([MEMORY_FREE_LIST + page_num] == 0) then
+        [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] + 1;
+    endif;
+
+    //Update the STATUS to READY for all processes (with valid PID) which have STATUS as WAIT_MEM.
+    alias i R3;
+    i = 0 ;
+    while(i < 16) do
+        if([PROCESS_TABLE + i * 16 + 4] == WAIT_MEM) then
+            [PROCESS_TABLE + i *16 + 4 ] = READY;
+        endif;
+        i = i + 1;
+    endwhile;
+    breakpoint;
+	return;
+endif;

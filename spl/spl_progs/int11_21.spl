@@ -1,0 +1,99 @@
+//save user stack value nad switch to kernel stack
+alias userSP R2;
+userSP = SP;
+[PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 13] = SP;
+SP = [PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 11] * 512 - 1;
+
+
+
+
+//extract system call number
+//PTBR = [PAGE_TABLE_BASE + [SYSTEM_STATUS_TABLE + 1] * 20];
+alias syscallnum R5;
+syscallnum = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+
+
+//wait system call
+if(syscallnum == 13) then
+
+    //change MODE FLAG to system call number
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 13;
+
+
+    //extract PID
+    alias PID R4;
+    PID = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+
+    //check if PID is valid if not return -1
+    if(PID == [SYSTEM_STATUS_TABLE + 1] || [PROCESS_TABLE + PID * 16 + 4] == TERMINATED || PID > 15 || PID < 0) then
+        [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+        [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+        SP = userSP;
+        ireturn;
+    endif;
+
+
+    //chage state to (WAIT_PROCESS, argument PID)
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 4] = WAIT_PROCESS;
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 5] = PID;
+
+
+    //invoke scheduler
+    multipush(R2, R4, R5, PTBR);
+    call MOD_5;
+    multipop(R2, R4, R5, PTBR);
+
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = 0;
+    SP = userSP;
+    ireturn;
+endif;
+
+
+
+
+//signal 
+if(syscallnum == 14) then
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 14;
+
+    //change the state of all those processes in (WAIT_PROCESS, current PID) to READY
+    alias i R1;
+    i = 0;
+    while(i < 16) do
+        if([PROCESS_TABLE + i * 16 + 4] == WAIT_PROCESS &&  [PROCESS_TABLE + i * 16 + 5] == [SYSTEM_STATUS_TABLE + 1]) then
+            [PROCESS_TABLE + i * 16 + 4] = READY;
+            [PROCESS_TABLE + i * 16 + 5] = -1;
+        endif;
+        i = i + 1;
+    endwhile;
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = 0;
+    SP = userSP;
+    ireturn;
+endif;
+
+
+
+//getpid
+if(syscallnum == 11) then
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = [SYSTEM_STATUS_TABLE + 1];
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+    SP = userSP;
+    ireturn;
+endif;
+
+
+//getppid
+if(syscallnum == 12) then
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 2];
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+    SP = userSP;
+    ireturn;
+endif;
+
+
+//change back to user stack
+SP = userSP;
+ireturn;

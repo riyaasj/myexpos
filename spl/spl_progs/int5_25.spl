@@ -1,0 +1,172 @@
+alias pt R3;
+pt = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+
+//save user stack value and switch to kernel stack
+alias userSP R4;
+userSP = SP;
+[pt + 13] = SP;
+SP = [pt + 11] * 512 - 1;
+
+
+//extract system call number
+alias sysno R1;
+sysno = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + (userSP - 5) % 512];
+
+[pt + 9] = sysno;
+
+
+alias returnadd R5;
+returnadd = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + (userSP - 1) % 512;
+
+alias pprt R7;
+pprt = [pt + 11] * 512 + RESOURCE_TABLE_OFFSET;
+
+
+//open
+if(sysno == 2) then
+    alias fileName R6;
+    fileName = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + (userSP - 4) % 512];
+    
+    //find a free per process resource table entry
+    alias i R2;
+    i = 0;
+    while(i < 8) do
+        if([pprt + i * 2] == -1) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == 8) then
+        [returnadd] = -3;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    alias fileTableEntry R9;
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8);
+    R1 = 3;
+    R2 = fileName;
+    call FILE_MANAGER;
+    fileTableEntry = R0;
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8);
+
+    if(fileTableEntry < 0) then
+        [returnadd] = fileTableEntry;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    [pprt + i * 2] = FILE;
+    [pprt + i * 2 + 1] = fileTableEntry;
+
+    [returnadd] = i;
+    SP = userSP;
+    [pt + 9] = 0;
+    ireturn;
+endif;
+
+
+//close
+if(sysno == 3 || 6) then
+    alias fileDesc R8;
+    fileDesc = [[PTBR + 2 * ((userSP - 4)) / 512] * 512 + (userSP - 4) % 512];
+
+    if(fileDesc > 7 || fileDesc < 0 || [pprt + 2 * fileDesc] != FILE) then 
+        [returnadd] = -1;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+endif;
+
+if(sysno == 3)
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9);
+    R1 = 4;
+    R2 = [pprt + 2 * fileDesc + 1];
+    call FILE_MANAGER;
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9);
+
+
+    [pprt + 2 * fileDesc] = -1;
+
+    [returnadd] = 0;
+    SP = userSP;
+    [pt + 9] = 0;
+    ireturn;
+
+endif;
+
+//seek
+if(sysno == 6) then
+
+    alias offset R13;
+    offset = [[PTBR + 2 * ((userSP - 3)) / 512] * 512 + (userSP - 3) % 512];
+    
+    alias oft R9;
+    oft = [pprt + 2 * fileDesc + 1];
+    
+    alias inodeIndex R10;
+    inodeIndex = [OPEN_FILE_TABLE + 4 * oft];
+
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+    R1 = 4;
+    R2 = inodeIndex;
+    R3 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER;
+    R10 = R0;
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+    if(R10 == -1) then
+        [returnadd] = -1;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    alias lseek R11;
+    lseek = OPEN_FILE_TABLE + 4 * oft + 2;
+
+    alias fileSize R12;
+    if(inodeIndex == INODE_ROOT) then   
+        fileSize = 480;
+    else
+        fileSize = [INODE_TABLE + 16 * inodeIndex + 2];
+    endif;
+
+    if([lseek] + offset < 0) then
+        multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+        R1 = 5;
+        R2 = inodeIndex;
+        R3 = [SYSTEM_STATUS_TABLE + 1];
+        call RESOURCE_MANAGER;
+        multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+        [returnadd] = -2;
+        SP = userSP;
+        [pt + 9] = 0;
+        ireturn;
+    endif;
+
+    if(offset == 0) then
+        [lseek] = 0;
+    else if([lseek] + offset > fileSize) then
+        [lseek] = fileSize;
+    else
+        [lseek] = [lseek] + offset;
+
+    endif;
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+    R1 = 5;
+    R2 = inodeIndex;
+    R3 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER;
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+    [returnadd] = 0;
+    SP = userSP;
+    [pt + 9] = 0;
+    ireturn; 
+endif;

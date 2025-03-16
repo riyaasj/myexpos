@@ -1,0 +1,55 @@
+//1. obtain PID of current process
+alias currPID R0;
+currPID = [SYSTEM_STATUS_TABLE + 1];
+
+//2. push base pointer to kernel stack
+multipush(BP); //pushes a sequence of registers into memory locations starting from the memory location pointed by SP
+
+
+//3. obtain proces table entry of current PID
+alias p_entry R1;
+p_entry = PROCESS_TABLE + currPID * 16;
+
+//4. save  KTPR, PTBR, PTLR
+[p_entry + 12] = SP % 512;
+[p_entry + 14] = PTBR;
+[p_entry + 15] = PTLR;
+
+
+alias newPID R2;
+newPID = currPID + 1;
+newPID = newPID % 16;
+while(newPID != currPID) do
+    if(newPID != 0) then
+        if([PROCESS_TABLE + newPID * 16 + 4] == READY || [PROCESS_TABLE + newPID * 16 + 4] == CREATED) then
+            break;
+        endif;
+    endif;
+    newPID = newPID + 1;
+    newPID = newPID % 16;
+endwhile;
+if(newPID == currPID) then
+    newPID = 0; // idle process
+endif;
+
+alias np_entry R3;
+np_entry = PROCESS_TABLE + newPID * 16;
+SP = [np_entry + 11] * 512 + [np_entry + 12];
+
+PTBR = [np_entry + 14];
+PTLR = [np_entry + 15];
+
+[SYSTEM_STATUS_TABLE + 1] = newPID;
+
+if([np_entry + 4] == CREATED) then
+	SP = [np_entry + 13];
+	[np_entry + 4] = RUNNING;
+	[np_entry + 9] = 0;
+	ireturn;
+endif;
+
+[np_entry + 4] = RUNNING;
+
+multipop(BP);
+
+return;

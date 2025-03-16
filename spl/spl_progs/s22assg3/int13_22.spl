@@ -1,0 +1,116 @@
+[SYSTEM_STATUS_TABLE + 27] = [SYSTEM_STATUS_TABLE + 27] + 1;
+
+//save user stack value and switch to kernel stack
+alias pt R6;
+pt = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+alias userSP R2;
+userSP = SP;
+[pt + 13] = SP;
+SP =  [pt + 11] * 512 - 1;
+
+
+//extract system call number 
+alias syscallnum R5;
+syscallnum = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+[pt + 9] = syscallnum;
+
+
+
+//semget
+if(syscallnum == 17) then
+    
+    alias i R1;
+    alias sem_desc R4;
+    sem_desc = 0;
+    i = ([pt + 11] + 1) * 512 - 16;
+
+    //find index (sem_desc) of free entry in per process resource table
+    while(i < ([pt + 11] + 1) * 512) do
+        if([i] == -1) then
+            break;
+        endif;
+        i = i + 2;
+        sem_desc = sem_desc + 1;
+    endwhile;
+
+    //if not available return -1
+    if(i == ([pt + 11] + 1) * 512) then 
+        [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+        [pt + 9] = 0;
+        SP = userSP;
+        ireturn;
+    endif;
+
+
+    //set resource identifier field to 1
+    [i] = 1;
+
+
+    //acquire semaphore
+    multipush(R0, R1, R2, R5);
+    R1 = 6;
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER;
+    R6 = R0;
+    multipop(R0, R1, R2, R5);
+
+
+    //if no free semaphores return -2
+    if(R6 == -1) then  
+        [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -2;
+        [pt + 9] = 0;
+        SP = userSP;
+        ireturn;
+    endif;
+
+
+    //sem table index
+    [i + 1] = R6; //
+
+
+    [pt + 9] = 0;
+    SP = userSP;
+    [[PTBR + ((userSP - 1) / 512) * 2] * 512 + (userSP - 1) % 512] = sem_desc;
+    ireturn;
+endif;
+
+
+
+//semrelease
+if(syscallnum == 18) then
+    alias sem_desc R4;
+    sem_desc = [[PTBR + ((userSP - 4) / 512) * 2] * 512 + (userSP - 4) % 512];
+    
+    
+    //if sem_desc not valid, return -1
+    if(sem_desc < 0 || sem_desc > 7 || [[pt + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2] != 1) then
+        [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+        [pt + 9] = 0;
+        SP = userSP;
+        ireturn;
+    endif;
+    
+
+    //release semaphore
+    multipush(R0, R1, R2, R5, R6);
+    R1 = 7;
+    R2 = [[pt + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 1];
+    R3 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER;
+    multipop(R0, R1, R2, R5, R6);
+
+    //invalidate per process table entry
+    [[pt + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2] = -1;
+    [[pt + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 1] = -1;
+
+    [pt + 9] = 0;
+    [[PTBR + ((userSP - 1) / 512) * 2] * 512 + (userSP - 1) % 512] = 0;
+    SP = userSP;
+    ireturn;
+
+
+endif;
+
+[pt + 9] = 0;
+SP = userSP;
+ireturn;
